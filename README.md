@@ -1,11 +1,15 @@
 # QuickRenameExt
-## Quick Rename Shell Extension
+## Quick Rename Shell Extension v1.0.1
 
 ![image](https://github.com/user-attachments/assets/5ba39611-d7fc-4258-8612-37fe88658174)
 
 VB6 made it fairly easy to make shell extensions- ActiveX DLLs that add functionality to the shell. But of course, you're limited to 32bit, and that means 64bit Explorer can't load them. But now with twinBASIC you can compile these as 64bit, as well as have access to features that make it even easier create these extensions.
 
 This first project illustrates how to create a simple Context Menu Handler: an extension that adds options to the right-click menu in Explorer and other apps that show the same context menu. It adds separators and a menu saying "Quick rename", which then has a submenu with several options to automatically format the names of the selected files.
+
+## Requirements
+-Windows 7 or newer\
+-To build: [twinBASIC Beta 617 or newer](https://github.com/twinbasic/twinbasic/releases) is strongly recommended; this project uses WinDevLib which is going to start requiring at least 617 within days. Though technically with the version included right now Beta 553 or newer will work.
 
 ## Using this project
 
