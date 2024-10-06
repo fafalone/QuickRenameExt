@@ -1,5 +1,5 @@
 # QuickRenameExt
-Quick Rename Shell Extension
+## Quick Rename Shell Extension
 
 
 VB6 made it fairly easy to make shell extensions- ActiveX DLLs that add functionality to the shell. But of course, you're limited to 32bit, and that means 64bit Explorer can't load them. But now with twinBASIC you can compile these as 64bit, as well as have access to features that make it even easier create these extensions.
