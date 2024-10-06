@@ -1,6 +1,7 @@
 # QuickRenameExt
 ## Quick Rename Shell Extension
 
+![image](https://github.com/user-attachments/assets/5ba39611-d7fc-4258-8612-37fe88658174)
 
 VB6 made it fairly easy to make shell extensions- ActiveX DLLs that add functionality to the shell. But of course, you're limited to 32bit, and that means 64bit Explorer can't load them. But now with twinBASIC you can compile these as 64bit, as well as have access to features that make it even easier create these extensions.
 
@@ -21,7 +22,11 @@ There are prebuilt binaries in the Releases section of this repository. You'd ne
 Like VB6, you start off by creating a new ActiveX DLL project. All we need in the project is a single class. It's best to use a .twin file here instead of a legacy .cls file because of a handy feature: You can manually specify the Class ID, so you won't need to go looking through the registry to get the GUID for the .reg file we'll need to complete the registration and configuration of our extension at the end.
 
 ```vba
-(class header)
+[Description("QuickRename Shell Extension v1.0.1")]
+[InterfaceId("390925D3-A156-4283-8B92-944E4D5A87AA")]
+[ClassId("BE204BEB-E623-4446-99F1-73DD0FFA3A74")]
+Public Class clsQuickRename
+Option Explicit
 ```
 
 Having access and control over these GUIDs is quite helpful; VB6 hid them from the user. In project settings, you want to make sure 'Use project id as type library id' is checked so you can also control that manually.
@@ -32,10 +37,24 @@ Now you can add `Implements IShellExtInit` and `Implements IContextMenu` then go
 
 ### Getting the selected files list
 
-When someone right clicks and the context menu is created, you get the initialization event in your class in the `IShellExtInit_Init` method. This includes an argument that passes you a pidl for the folded the click occured in and an object representing the files that are selected. They selection needs to be stored in a class-level variable so they're available later. Most examples just look up the file system paths and store those, but in this project I store them as fully qualified pidls, which has the advantage of supporting virtual locations without actual paths.
+When someone right clicks and the context menu is created, you get the initialization event in your class in the `IShellExtInit_Initialize` method. This includes an argument that passes you a pidl for the folded the click occured in and an object representing the files that are selected. They selection needs to be stored in a class-level variable so they're available later. Most examples just look up the file system paths and store those, but in this project I store them as fully qualified pidls, which has the advantage of supporting virtual locations without actual paths.
 
 ```vba
-(code)
+Private Sub IShellExtInit_Initialize(ByVal pidlFolder As LongPtr, ByVal lpIDataObject As IDataObject, ByVal hkeyProgId As LongPtr) Implements IShellExtInit.Initialize
+    'Get file list
+    'We retrieve and keep a reference to the selected files as pidls; this way by not relying
+    'on file system paths our extension should work in devices and virtual locations where
+    'Explorer can still rename the files.
+    nFiles = 0
+    Dim psia As IShellItemArray
+    Err.ReturnHResult = SHCreateShellItemArrayFromDataObject(lpIDataObject, IID_IShellItemArray, psia)
+'...
+            Do While pEnum.Next(1, siChild) = S_OK
+                Set pPersist = siChild
+                If pPersist IsNot Nothing Then
+                    pPersist.GetIDList(pidl)
+                    ReDim Preserve mFiles(nFiles)
+                    mFiles(nFiles) = ILCloneFull(pidl)
 ```
 
 ### Adding the menu items
@@ -50,7 +69,13 @@ I'm going to skip over responding to requests for text info; you can see comment
 The main thing of interest is the `IContextMenu_InvokeCommand` method, where we handle a click on one of our menu items. Unlike some other examples, we receive the `CMINVOKECOMMANDINFO` type as a pointer, because it can also be `CMINVOKECOMMANDINFOEX`, and I like to support both. We use tB's new pointer casting support to take a peek at the `.cbSize` member, which tells us which version has been passed:
 
 ```vba
-(code)
+Private Sub IContextMenu_InvokeCommand(ByVal lpici As LongPtr) Implements IContextMenu.InvokeCommand
+    If lpici = 0 Then
+        Err.ReturnHResult = E_INVALIDARG
+        Exit Sub
+    End If
+    Dim lpVerb As LongPtr
+    Dim cbSize As Long = (CType(Of CMINVOKECOMMANDINFO)(lpici)).cbSize
 ```
 
 The -EX version is supposed to support Unicode, but when testing this project I came across what seems like a bug in Windows; the flag indicating it uses Unicode is set, but the `.lpVerbW` member is 0-- only the original `.lpVerb` contains our command id.
@@ -58,7 +83,19 @@ The -EX version is supposed to support Unicode, but when testing this project I 
 The command id here can be either our numeric id or a String. Since we supplied `.wID` values for the menu items, it should always be the former, but it's good to check to be sure:
 
 ```vba
-(code}
+    #If Win64 Then
+    If (lpVerb And &HFFFFFFFFFFFF0000) <> 0 Then
+    #Else
+    If (lpVerb And &HFFFF0000) <> 0 Then
+    #End If
+    
+        ' lpVerb is a string
+'...
+    Else
+        'Just the id
+        idx = CLng(lpVerb)
+    End If
+    DoRename idx
 ```
 
 From there we just carry out the desired command. This project uses `IFileOperation` to continue with the high level shell references and methods that let us rename wherever Explorer can, not beholden to requiring a real file system path. It also manages error dialogs automatically.
@@ -68,7 +105,9 @@ From there we just carry out the desired command. This project uses `IFileOperat
 With everything in place, the project can now be built. Like VB6, tB will take care of the standard ActiveX registration, leaving just the need for the shell extension specific registry entries in QuickRenameExt.reg:
 
 ```
-(reg)
+REGEDIT4
+[HKEY_CLASSES_ROOT\*\shellex\ContextMenuHandlers\QuickRenameExt]
+@="{BE204BEB-E623-4446-99F1-73DD0FFA3A74}"
 ```
 
 The * there means our menu items should appear for all file types. You can specify alternatives here, e.g. changing the * to `exefile` results in the menu only being added for .exe files.
