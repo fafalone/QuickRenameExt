@@ -1,0 +1,485 @@
+[Description("QuickRename Shell Extension v1.0.1")]
+[InterfaceId("390925D3-A156-4283-8B92-944E4D5A87AA")]
+[ClassId("BE204BEB-E623-4446-99F1-73DD0FFA3A74")]
+Public Class clsQuickRename
+Option Explicit
+
+'****************************************************************************
+'QuickRename Shell Extension v1.0.1
+'by Jon Johnson
+'
+'
+'This is a demonstration of how you can use twinBASICto create 64bit shell 
+'extensions for Windows. For 64bit Windows, 32bit shell extensions no longer
+'work in Explorer, so VB6, which made making and registering them easy, can
+'no longer do it.
+'
+'Note: The .reg file included in the project folder must be merged after 
+'  the dll is compiled. The GUID in the file is much easier to find in tB:
+'  It must match the [ClassId()] GUID that tB lets you specify. You don't 
+'  need to find the ProgId in the registry; when you set the class id here, 
+'  that's the authoritative source that's registered.
+'
+'Changelog:
+'
+'v1.0.1 (06 Oct 2024) - Initial release
+'****************************************************************************
+
+
+'Debug log
+Private Const ENABLE_LOGGING As Boolean = False
+Private log_hFile As LongPtr
+Private log_RetVal As Long
+Private log_sBuf() As String
+Private log_bBuf As Boolean
+Private log_bActive As Boolean
+
+
+Implements IShellExtInit
+Implements IContextMenu
+' Implements IExplorerCommand - We'll cover this in v2.0
+' Implements IObjectWithSite
+
+Private mFiles() As LongPtr 'Reference files by fully qualified pidl to support renaming in virtual objects
+Private nFiles As Long
+
+Private Const sMenuHdr = "Quick rename"
+Private Const sHelpHdr = "Standard options to format the file names of selected items."
+Private Const sMenu1 = "Convert to UPPERCASE" 'Menu item caption
+Private Const sVerb1 = "qrtoupper" 'For GCS_VERB
+Private Const sHelp1 = "Convert all letters in the selected files' names to uppercase." 'For GCS_HELPTEXT
+Private Const sMenu2 = "Convert to lowercase"
+Private Const sVerb2 = "qrtolower"
+Private Const sHelp2 = "Convert all letters in the selected files' names to lowercase."
+Private Const sMenu3 = "Capitalize first letter"
+Private Const sVerb3 = "qrtocap"
+Private Const sHelp3 = "Capitalize the first letter then convert the remaining letters in the selected files' names to lowercase."
+Private Const sMenu4 = "Replace periods/underscores with spaces"
+Private Const sVerb4 = "qrptos"
+Private Const sHelp4 = "Change . or _ in the selected files' names to spaces."
+
+Private mIDF As Long
+Private Const IDI_RENAME = 101
+Private Const IDB_HEADER = 201
+ 
+Private hBmp As LongPtr
+
+Private Sub IShellExtInit_Initialize(ByVal pidlFolder As LongPtr, ByVal lpIDataObject As IDataObject, ByVal hkeyProgId As LongPtr) Implements IShellExtInit.Initialize
+    'Get file list
+    'We retrieve and keep a reference to the selected files as pidls; this way by not relying
+    'on file system paths our extension should work in devices and virtual locations where
+    'Explorer can still rename the files.
+    nFiles = 0
+    Dim psia As IShellItemArray
+    Err.ReturnHResult = SHCreateShellItemArrayFromDataObject(lpIDataObject, IID_IShellItemArray, psia)
+    If psia IsNot Nothing Then
+        Dim pEnum As IEnumShellItems
+        Dim pidl As LongPtr
+        Dim siChild As IShellItem
+        Dim pPersist As IPersistIDList
+        Dim dbgName As String, dbglp As LongPtr
+        psia.EnumItems pEnum
+        If pEnum IsNot Nothing Then
+            If nFiles Then
+                FreeIDListArray(mFiles, nFiles)
+                ReDim mFiles(0)
+                nFiles = 0
+            End If
+            
+            Do While pEnum.Next(1, siChild) = S_OK
+                Set pPersist = siChild
+                If pPersist IsNot Nothing Then
+                    pPersist.GetIDList(pidl)
+                    ReDim Preserve mFiles(nFiles)
+                    mFiles(nFiles) = ILCloneFull(pidl)
+                    SHGetNameFromIDList(mFiles(nFiles), SIGDN_FILESYSPATH, dbglp)
+                    dbglp = 0
+                    If dbglp Then
+                        WriteLog "IShellExtInit_Init::File " & LPWSTRtoStr(dbglp)
+                    End If
+                    nFiles += 1
+                End If
+            Loop
+        End If
+    End If
+End Sub
+
+Private Sub IContextMenu_QueryContextMenu(ByVal hMenu As LongPtr, ByVal indexMenu As Long, ByVal idCmdFIrst As Long, ByVal idCmdLast As Long, ByVal uFlags As QueryContextMenuFlags) Implements IContextMenu.QueryContextMenu
+    'Most examples use a vtable swap for this method, in order to be able to 
+    'return an HRESULT, which is required. Fortunately, twinBASIC has 
+    'Err.ReturnHResult, so we can return one right from here without a swap.
+    
+    'First, optionally insert a seperator
+    Call InsertMenu(hMenu, indexMenu, MF_SEPARATOR Or MF_BYPOSITION, 0, vbNullString)
+    
+    Dim tItem As MENUITEMINFOW
+    Dim hSub As LongPtr = CreatePopupMenu()
+  
+    With tItem
+        .cbSize = LenB(Of MENUITEMINFOW)
+        .fMask = MIIM_STRING Or MIIM_ID
+        .wID = idCmdFIrst + 1
+        .dwTypeData = StrPtr(sMenu1)
+        .cch = Len(sMenu1)
+     End With
+    InsertMenuItemW hSub, 0, CTRUE, tItem
+    With tItem
+        .cbSize = LenB(Of MENUITEMINFOW)
+        .fMask = MIIM_STRING Or MIIM_ID
+        .wID = idCmdFIrst + 2
+        .dwTypeData = StrPtr(sMenu2)
+        .cch = Len(sMenu2)
+    End With
+    InsertMenuItemW hSub, 1, CTRUE, tItem
+    With tItem
+        .cbSize = LenB(Of MENUITEMINFOW)
+        .fMask = MIIM_STRING Or MIIM_ID
+        .wID = idCmdFIrst + 3
+        .dwTypeData = StrPtr(sMenu3)
+        .cch = Len(sMenu3)
+    End With
+    InsertMenuItemW hSub, 2, CTRUE, tItem
+    With tItem
+        .cbSize = LenB(Of MENUITEMINFOW)
+        .fMask = MIIM_STRING Or MIIM_ID
+        .wID = idCmdFIrst + 4
+        .dwTypeData = StrPtr(sMenu4)
+        .cch = Len(sMenu4)
+    End With
+    InsertMenuItemW hSub, 3, CTRUE, tItem
+    
+    hBmp = LoadImageW(App.hInstance, StrPtr("201"), IMAGE_BITMAP, 0&, 0&, LR_DEFAULTSIZE Or LR_CREATEDIBSECTION)
+    ZeroMemory tItem, LenB(tItem)
+    With tItem
+        .cbSize = LenB(Of MENUITEMINFOW)
+        .fMask = MIIM_STRING Or MIIM_BITMAP Or MIIM_ID Or MIIM_SUBMENU
+        .wID = idCmdFIrst
+        .dwTypeData = StrPtr(sMenuHdr)
+        .cch = Len(sMenuHdr)
+        .hbmpItem = hBmp
+        .hSubMenu = hSub
+    End With
+    InsertMenuItemW hMenu, indexMenu + 1, CTRUE, tItem
+    
+    
+    Call InsertMenu(hMenu, indexMenu + 2, MF_SEPARATOR Or MF_BYPOSITION, 0, vbNullString)
+    
+    mIDF = idCmdFIrst
+    
+    'Per MSDN:
+    ' If successful, returns an HRESULT value that has its severity value set 
+    ' to SEVERITY_SUCCESS and its code value set to the offset of the largest 
+    ' command identifier that was assigned, plus one. For example, if idCmdFirst 
+    ' is set to 5 and you add three items to the menu with command identifiers
+    ' of 5, 7, and 8, the return value should be MAKE_HRESULT(SEVERITY_SUCCESS, 0, 8 - 5 + 1).
+    ' Otherwise, it returns a COM error value.
+    'Since SEVERITY_SUCCESS is 0, I've ignored it.
+    Err.ReturnHResult = (idCmdFIrst + 4) - idCmdFIrst + 1
+    
+    
+End Sub
+
+Private Sub IContextMenu_GetCommandString(ByVal idCmd As Long, ByVal uType As GetCommandStringFlags, pwReserved As Long, ByVal pszName As LongPtr, ByVal cchMax As Long) Implements IContextMenu.GetCommandString
+    WriteLog "IContextMenu_GetCommandString::uType=" & uType
+    Select Case uType
+        Case GCS_HELPTEXT, GCS_HELPTEXTW
+            Dim sText As String
+            If idCmd = 0 Then sText = sHelpHdr
+            If idCmd = 1 Then sText = sHelp1
+            If idCmd = 2 Then sText = sHelp2
+            If idCmd = 3 Then sText = sHelp3
+            If idCmd = 4 Then sText = sHelp4
+            
+            Dim btText() As Byte
+            If uType <> GCS_HELPTEXTW Then
+                sText = StrConv(sText, vbFromUnicode)
+            End If
+            WriteLog "IContextMenu_GetCommandString::GCS_HELPTEXT=" & sText
+            btText = sText
+            
+            CopyMemory ByVal pszName, btText(0), UBound(btText) + 1
+            
+        Case GCS_VERB, GCS_VERBW
+            Dim sVerb As String
+            ' If idCmd = 0 Then sVerb = sHelpHdr
+            If idCmd = 1 Then sVerb = sVerb1
+            If idCmd = 2 Then sVerb = sVerb2
+            If idCmd = 3 Then sVerb = sVerb3
+            If idCmd = 4 Then sVerb = sVerb4
+            
+            Dim btVerb() As Byte
+            If uType <> GCS_HELPTEXTW Then
+                sVerb = StrConv(sVerb, vbFromUnicode)
+            End If
+            WriteLog "IContextMenu_GetCommandString::GCS_VERB=" & sVerb
+            btVerb = sVerb
+            
+            
+            CopyMemory ByVal pszName, btVerb(0), UBound(btVerb) + 1
+            
+        Case Else
+            Err.ReturnHResult = E_INVALIDARG
+    End Select
+End Sub
+
+Private Sub IContextMenu_InvokeCommand(ByVal lpici As LongPtr) Implements IContextMenu.InvokeCommand
+    If lpici = 0 Then
+        Err.ReturnHResult = E_INVALIDARG
+        Exit Sub
+    End If
+    Dim lpVerb As LongPtr
+    Dim cbSize As Long = (CType(Of CMINVOKECOMMANDINFO)(lpici)).cbSize
+    If cbSize = LenB(Of CMINVOKECOMMANDINFOEX) Then
+        Dim tICIEx As CMINVOKECOMMANDINFOEX
+        CopyMemory tICIEx, ByVal lpici, LenB(Of CMINVOKECOMMANDINFOEX)
+        ' If tICIEx.fMask And CMIC_MASK_UNICODE Then
+        '     lpVerb = tICIEx.lpVerbW
+        '     WriteLog "IContextMenu_InvokeCommand::ExW," & lpVerb
+        ' Else
+        '     lpVerb = tICIEx.lpVerb
+        '     WriteLog "IContextMenu_InvokeCommand::ExA," & lpVerb
+        ' End If
+        ' That's supposed to work, but doesn't. Explorer will set the
+        ' CMIC_MASK_UNICODE flag, but only actually fill in lpVerb;
+        ' lpVerbW will be 0.
+        lpVerb = tICIEx.lpVerb
+    ElseIf cbSize = LenB(Of CMINVOKECOMMANDINFO) Then
+        Dim tICI As CMINVOKECOMMANDINFO
+        CopyMemory tICI, ByVal lpici, LenB(Of CMINVOKECOMMANDINFO)
+        lpVerb = tICI.lpVerb
+        WriteLog "IContextMenu_InvokeCommand::Std," & lpVerb
+    End If
+    Dim sVerb As String, idx As Long
+    #If Win64 Then
+    If (lpVerb And &HFFFFFFFFFFFF0000) <> 0 Then
+    #Else
+    If (lpVerb And &HFFFF0000) <> 0 Then
+    #End If
+    
+        ' lpVerb is a string so
+        ' copy it from the pointer
+        If tICIEx.fMask And CMIC_MASK_UNICODE Then
+            sVerb = LPWSTRtoStr(lpVerb, False)
+        Else
+            sVerb = StrFromPtrA(lpVerb)
+        End If
+         
+        If sVerb = sVerb1 Then idx = 1
+        If sVerb = sVerb2 Then idx = 2
+        If sVerb = sVerb3 Then idx = 3
+        If sVerb = sVerb4 Then idx = 4
+        WriteLog "IContextMenu_InvokeCommand::idxByStr=" & idx & ",mIDF=" & mIDF
+    Else
+        WriteLog "IContextMenu_InvokeCommand::idxById=" & idx
+        idx = CLng(lpVerb)
+    End If
+    DoRename idx
+End Sub
+
+Private Function DoRename(idCmd As Long) As Long
+    'Using IFileOperation here lets us support any kind of location
+    'Explorer does, including virtual ones without a normal file system
+    'path as would be required for a simple Name command.
+    If nFiles = 0 Then Return E_INVALIDARG
+    
+    Dim pOp As New FileOperation
+    Dim siFiles() As IShellItem
+    Dim i As Long, j As Long
+    Dim lpName As LongPtr
+    Dim sOldNames() As String, sNewNames() As String
+    ReDim siFiles(UBound(mFiles))
+    For i = 0 To UBound(mFiles)
+        ReDim Preserve siFiles(j)
+        'Recall we stored the file list as fully qualified pidls:
+        SHCreateItemFromIDList(mFiles(i), IID_IShellItem, siFiles(j))
+        If siFiles(j) IsNot Nothing Then
+            siFiles(j).GetDisplayName(SIGDN_PARENTRELATIVEPARSING, lpName)
+            ReDim Preserve sOldNames(j)
+            ReDim Preserve sNewNames(j)
+            sOldNames(j) = LPWSTRtoStr(lpName)
+            Select Case idCmd
+                Case 1: sNewNames(j) = UCase$(sOldNames(j))
+                Case 2: sNewNames(j) = LCase$(sOldNames(j))
+                Case 3
+                    sNewNames(j) = LCase$(sOldNames(j))
+                    sNewNames(j) = Mid$(sNewNames(j), 2)
+                    sNewNames(j) = UCase$(Mid$(sOldNames(j), 1, 1)) & sNewNames(j)
+                Case 4
+                    sNewNames(j) = Replace$(sOldNames(j), ".", " ")
+                    sNewNames(j) = Replace$(sOldNames(j), "_", " ")
+            End Select
+            pOp.RenameItem(siFiles(j), StrPtr(sNewNames(j)), Nothing)
+            j += 1
+        End If
+    Next
+    pOp.SetOperationFlags(FOF_ALLOWUNDO Or FOF_NOCONFIRMATION Or FOF_SILENT)
+    pOp.PerformOperations()
+    pOp.GetAnyOperationsAborted(DoRename)
+End Function
+
+Private Function StrFromPtrA(ByVal lpszA As LongPtr) As String
+
+   StrFromPtrA = String$(lstrlenA(ByVal lpszA), 0)
+   lstrcpyA ByVal StrFromPtrA, ByVal lpszA
+
+End Function
+
+Private Sub Class_Initialize()
+    If ENABLE_LOGGING Then
+        StartLog "C:\temp\QRShellExt-" & Format$(Now, "yyyymmddHhNnSs") & ".log", False
+    End If
+End Sub
+
+Private Sub Class_Terminate()
+    If hBmp Then DeleteObject(hBmp)
+    StopLog
+    If nFiles Then
+        FreeIDListArray(mFiles, nFiles)
+        ReDim mFiles(0)
+        nFiles = 0
+    End If
+End Sub
+
+
+'Coming soon in v2.0:
+
+' Private Sub IExplorerCommand_GetTitle(ByVal psiItemArray As IShellItemArray, ppszName As LongPtr) Implements IExplorerCommand.GetTitle
+    
+' End Sub
+
+' Private Sub IExplorerCommand_EnumSubCommands(ppenum As IEnumExplorerCommand) Implements IExplorerCommand.EnumSubCommands
+    
+' End Sub
+
+' Private Sub IExplorerCommand_GetCanonicalName(pguidCommandName As UUID) Implements IExplorerCommand.GetCanonicalName
+    
+' End Sub
+
+' Private Sub IExplorerCommand_GetFlags(pFlags As EXPCMDFLAGS) Implements IExplorerCommand.GetFlags
+    
+' End Sub
+
+' Private Sub IExplorerCommand_GetIcon(ByVal psiItemArray As IShellItemArray, ppszIcon As LongPtr) Implements IExplorerCommand.GetIcon
+    
+' End Sub
+
+' Private Sub IExplorerCommand_GetState(ByVal psiItemArray As IShellItemArray, ByVal fOkToBeSlow As BOOL, pCmdState As EXPCMDSTATE) Implements IExplorerCommand.GetState
+    
+' End Sub
+
+' Private Sub IExplorerCommand_GetToolTip(ByVal psiItemArray As IShellItemArray, ppszInfotip As LongPtr) Implements IExplorerCommand.GetToolTip
+    
+' End Sub
+
+' Private Sub IExplorerCommand_Invoke(ByVal psiItemArray As IShellItemArray, ByVal pbc As IBindCtx) Implements IExplorerCommand.Invoke
+    
+' End Sub
+
+' Private Sub IObjectWithSite_SetSite(ByVal pUnkSite As stdole.IUnknown) Implements IObjectWithSite.SetSite
+    
+' End Sub
+
+' Private Sub IObjectWithSite_GetSite(riid As UUID, ppvSite As stdole.IUnknown) Implements IObjectWithSite.GetSite
+    
+' End Sub
+
+
+
+
+
+
+
+'DEBUG LOGGER:
+
+
+Private Sub StartLog(szFile As String, Append As Boolean)
+Debug.Print "StartLog.szFile=" & szFile
+If Append = True Then
+    If PathFileExistsW(StrPtr(szFile)) = 0 Then Append = False
+End If
+If Not Append Then
+    'open the file for writing, clearing the contents of any existing file
+    log_hFile = CreateFileW(StrPtr(szFile), GENERIC_WRITE, FILE_SHARE_READ, vbNullPtr, CREATE_ALWAYS, FILE_ATTRIBUTE_ARCHIVE, 0&)
+
+    'if error
+    If log_hFile = -1 Then Debug.Print "ERROR: Logfile could not be opened for writing."
+Else
+'open the file for appending
+    log_hFile = CreateFileW(StrPtr(szFile), GENERIC_WRITE, FILE_SHARE_READ, vbNullPtr, OPEN_ALWAYS, FILE_ATTRIBUTE_ARCHIVE, 0&)
+    'if error
+    If log_hFile = -1 Then
+        Debug.Print "ERROR: Logfile could not be opened for writing."
+    Else
+        'we need to move to EOF
+        log_RetVal = SetFilePointer(log_hFile, 0&, 0&, FILE_END)
+    End If
+End If
+log_bActive = True
+End Sub
+
+Private Function WriteLog(ByVal data As String) As Long
+Dim lngBytesWritten As Long 'output number of bytes actually written to the file
+
+If log_bActive = False Then Exit Function
+
+Dim sWrite As String
+sWrite = data & vbCrLf
+If log_bBuf = True Then
+    Call BufferEntry(sWrite)
+    WriteLog = -555
+Else
+    WriteLog = WriteFile(log_hFile, ByVal StrPtr(sWrite), LenB(sWrite), lngBytesWritten, vbNullPtr)
+End If
+End Function
+
+Private Function WriteBuffer() As Long
+If (UBound(log_sBuf) = 0) And (log_sBuf(0) = "") Then Exit Function
+
+Dim i As Long
+Dim lngBytesWritten As Long 'output number of bytes actually written to the file
+Dim sItem As String
+
+For i = 0 To UBound(log_sBuf)
+    sItem = log_sBuf(i) ' & vbCrLf
+    WriteBuffer = WriteFile(log_hFile, ByVal StrPtr(sItem), LenB(sItem), lngBytesWritten, vbNullPtr)
+Next i
+
+ReDim log_sBuf(0)
+
+End Function
+
+Private Sub StopLog()
+If log_hFile Then log_RetVal = CloseHandle(log_hFile)
+log_hFile = 0& 'just in case
+log_bActive = False
+End Sub
+
+Private Sub BufferEntry(ByVal data As String)
+'exposing this as a public is purely optional
+If log_sBuf(0) = "" Then
+    log_sBuf(0) = data
+Else
+    ReDim Preserve log_sBuf(UBound(log_sBuf) + 1)
+    log_sBuf(UBound(log_sBuf)) = data
+End If
+
+End Sub
+
+Private Sub StartBuffer()
+'all calls to WriteLog are stored in a buffer rather than written to disk
+'this is designed for when a massive number of writes are expected in a short time,
+'therefore writing to disk would be a massive reduction in performance
+On Error Resume Next
+'If dbg_no_buffer Then Exit Sub
+
+log_bBuf = True
+
+End Sub
+
+Private Sub StopBuffer()
+'writes the existing buffer to disk and returns WriteLog to immediate disk writes
+log_bBuf = False
+WriteBuffer
+
+End Sub
+End Class

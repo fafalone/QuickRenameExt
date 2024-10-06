@@ -1,0 +1,8 @@
+Private Module RegisterShellExt
+
+[RunAfterBuild]
+Private Sub RunRegFile()
+    ShellExecute 0, "open", App.Path & "\" & App.Title & ".reg", vbNullString, vbNullString, SW_SHOWNORMAL
+End Sub
+
+End Module
