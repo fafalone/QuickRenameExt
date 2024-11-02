@@ -15,6 +15,10 @@ This first project illustrates how to create a simple Context Menu Handler: an e
 
 Everything is all ready to go in the .twinproj. Run tB as admin so it can register to HKLM. Then in the toolbar choose 'win64' from the dropdown to compile as 64bit and select build. And that's it-- this project takes advantage of tB's `[RunAfterBuild]` attribute to automatically merge the .reg file.
 
+On 64bit Windows you should build both the 32 and 64bit version so it also appears in 32bit apps.
+
+
+
 ### Manual registration
 
 There are prebuilt binaries in the Releases section of this repository. You'd need to register with regsvr32 in System32 then double click QuickRenameExt.reg to finish registration.
