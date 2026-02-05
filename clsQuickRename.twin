@@ -399,13 +399,13 @@ If Append = True Then
 End If
 If Not Append Then
     'open the file for writing, clearing the contents of any existing file
-    log_hFile = CreateFileW(StrPtr(szFile), GENERIC_WRITE, FILE_SHARE_READ, vbNullPtr, CREATE_ALWAYS, FILE_ATTRIBUTE_ARCHIVE, 0&)
+    log_hFile = CreateFileW(StrPtr(szFile), GENERIC_WRITE, FILE_SHARE_READ, ByVal vbNullPtr, CREATE_ALWAYS, FILE_ATTRIBUTE_ARCHIVE, 0&)
 
     'if error
     If log_hFile = -1 Then Debug.Print "ERROR: Logfile could not be opened for writing."
 Else
 'open the file for appending
-    log_hFile = CreateFileW(StrPtr(szFile), GENERIC_WRITE, FILE_SHARE_READ, vbNullPtr, OPEN_ALWAYS, FILE_ATTRIBUTE_ARCHIVE, 0&)
+    log_hFile = CreateFileW(StrPtr(szFile), GENERIC_WRITE, FILE_SHARE_READ, ByVal vbNullPtr, OPEN_ALWAYS, FILE_ATTRIBUTE_ARCHIVE, 0&)
     'if error
     If log_hFile = -1 Then
         Debug.Print "ERROR: Logfile could not be opened for writing."
@@ -428,7 +428,7 @@ If log_bBuf = True Then
     Call BufferEntry(sWrite)
     WriteLog = -555
 Else
-    WriteLog = WriteFile(log_hFile, ByVal StrPtr(sWrite), LenB(sWrite), lngBytesWritten, vbNullPtr)
+    WriteLog = WriteFile(log_hFile, ByVal StrPtr(sWrite), LenB(sWrite), lngBytesWritten, ByVal vbNullPtr)
 End If
 End Function
 
@@ -441,7 +441,7 @@ Dim sItem As String
 
 For i = 0 To UBound(log_sBuf)
     sItem = log_sBuf(i) ' & vbCrLf
-    WriteBuffer = WriteFile(log_hFile, ByVal StrPtr(sItem), LenB(sItem), lngBytesWritten, vbNullPtr)
+    WriteBuffer = WriteFile(log_hFile, ByVal StrPtr(sItem), LenB(sItem), lngBytesWritten, ByVal vbNullPtr)
 Next i
 
 ReDim log_sBuf(0)
